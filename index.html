@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<html lang="nl">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Planten Tracker Pro</title>
+  <title>Plant Tracker Pro</title>
 
- 
   <style>
     body {
       font-family: Arial;
@@ -25,14 +24,13 @@
 </head>
 <body>
 
-
-<h1>🌱 Planten Tracker</h1>
+<h1>🌱 Plant Tracker</h1>
 
 <!-- LOGIN -->
 <div id="auth">
   <h3>Login / Register</h3>
   <input type="email" id="email" placeholder="Email">
-  <input type="password" id="password" placeholder="Wachtwoord">
+  <input type="password" id="password" placeholder="Password">
   <button onclick="register()">Register</button>
   <button onclick="login()">Login</button>
 </div>
@@ -41,10 +39,10 @@
 <div id="app" style="display:none;">
   <button onclick="logout()">Logout</button>
 
-  <h3>Nieuwe plant</h3>
-  <input id="name" placeholder="Naam">
-  <input id="days" type="number" placeholder="Water elke X dagen">
-  <button onclick="addPlant()">Toevoegen</button>
+  <h3>Add Plant</h3>
+  <input id="name" placeholder="Name">
+  <input id="days" type="number" placeholder="Water every X days">
+  <button onclick="addPlant()">Add</button>
 
   <div id="plants"></div>
 </div>
@@ -53,11 +51,10 @@
   // Import the functions you need from the SDKs you need
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
+  import { getAuth } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js";
+  import { getFirestore } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
 
   // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
   const firebaseConfig = {
     apiKey: "AIzaSyC-dkeiBKMSRb2IPUTGO7Ua7YDFpBKJQeA",
     authDomain: "planty-d4f1a.firebaseapp.com",
@@ -71,29 +68,45 @@
   // Initialize Firebase
   const app = initializeApp(firebaseConfig);
   const analytics = getAnalytics(app);
+  
+  // Initialize Auth and Firestore with proper imports
+  window.auth = getAuth(app);
+  window.db = getFirestore(app);
 </script>
 
-firebase.initializeApp(firebaseConfig);
-
-const auth = firebase.auth();
-const db = firebase.firestore();
-
+<script>
 /* =========================
    🔐 AUTH
    ========================= */
 
 function register() {
-  const email = emailInput.value;
-  const password = passwordInput.value;
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
 
-  auth.createUserWithEmailAndPassword(email, password);
+  if (!email || !password) {
+    alert("Please enter email and password");
+    return;
+  }
+
+  auth.createUserWithEmailAndPassword(email, password)
+    .catch(error => {
+      alert("Registration error: " + error.message);
+    });
 }
 
 function login() {
-  const email = emailInput.value;
-  const password = passwordInput.value;
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
 
-  auth.signInWithEmailAndPassword(email, password);
+  if (!email || !password) {
+    alert("Please enter email and password");
+    return;
+  }
+
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(error => {
+      alert("Login error: " + error.message);
+    });
 }
 
 function logout() {
@@ -112,70 +125,106 @@ auth.onAuthStateChanged(user => {
 });
 
 /* =========================
-   🌱 PLANTEN
+   🌱 PLANTS
    ========================= */
 
 async function addPlant() {
   const name = document.getElementById("name").value;
   const days = parseInt(document.getElementById("days").value);
 
+  if (!name || !days || days <= 0) {
+    alert("Please enter a valid plant name and watering interval");
+    return;
+  }
+
   const user = auth.currentUser;
 
-  await db.collection("plants").add({
-    userId: user.uid,
-    name,
-    interval: days,
-    lastWatered: Date.now()
-  });
+  if (!user) {
+    alert("Please login first");
+    return;
+  }
 
-  loadPlants();
+  try {
+    await db.collection("plants").add({
+      userId: user.uid,
+      name,
+      interval: days,
+      lastWatered: Date.now()
+    });
+
+    document.getElementById("name").value = "";
+    document.getElementById("days").value = "";
+    loadPlants();
+  } catch (error) {
+    alert("Error adding plant: " + error.message);
+  }
 }
 
 async function loadPlants() {
   const user = auth.currentUser;
-  const snapshot = await db.collection("plants")
-    .where("userId", "==", user.uid)
-    .get();
+  
+  if (!user) return;
 
-  const container = document.getElementById("plants");
-  container.innerHTML = "";
+  try {
+    const snapshot = await db.collection("plants")
+      .where("userId", "==", user.uid)
+      .get();
 
-  snapshot.forEach(doc => {
-    const plant = doc.data();
+    const container = document.getElementById("plants");
+    container.innerHTML = "";
 
-    const now = Date.now();
-    const daysPassed = (now - plant.lastWatered) / (1000*60*60*24);
-    const daysLeft = Math.ceil(plant.interval - daysPassed);
+    if (snapshot.empty) {
+      container.innerHTML = "<p>No plants yet. Add one above!</p>";
+      return;
+    }
 
-    const div = document.createElement("div");
-    div.className = "plant";
+    snapshot.forEach(doc => {
+      const plant = doc.data();
 
-    div.innerHTML = `
-      <b>${plant.name}</b><br>
-      ${daysLeft <= 0 ? "⚠️ Water nodig!" : daysLeft + " dagen over"}
-      <br>
-      <button onclick="waterPlant('${doc.id}')">Water gegeven</button>
-      <button onclick="deletePlant('${doc.id}')">Delete</button>
-    `;
+      const now = Date.now();
+      const daysPassed = (now - plant.lastWatered) / (1000*60*60*24);
+      const daysLeft = Math.ceil(plant.interval - daysPassed);
 
-    container.appendChild(div);
-  });
+      const div = document.createElement("div");
+      div.className = "plant";
+
+      div.innerHTML = `
+        <b>${plant.name}</b><br>
+        ${daysLeft <= 0 ? "⚠️ Needs water!" : daysLeft + " days left"}
+        <br>
+        <button onclick="waterPlant('${doc.id}')">Watered</button>
+        <button onclick="deletePlant('${doc.id}')">Delete</button>
+      `;
+
+      container.appendChild(div);
+    });
+  } catch (error) {
+    console.error("Error loading plants:", error);
+  }
 }
 
 async function waterPlant(id) {
-  await db.collection("plants").doc(id).update({
-    lastWatered: Date.now()
-  });
-  loadPlants();
+  try {
+    await db.collection("plants").doc(id).update({
+      lastWatered: Date.now()
+    });
+    loadPlants();
+  } catch (error) {
+    alert("Error updating plant: " + error.message);
+  }
 }
 
 async function deletePlant(id) {
-  await db.collection("plants").doc(id).delete();
-  loadPlants();
+  try {
+    await db.collection("plants").doc(id).delete();
+    loadPlants();
+  } catch (error) {
+    alert("Error deleting plant: " + error.message);
+  }
 }
 
 /* =========================
-   🔔 NOTIFICATIES
+   🔔 NOTIFICATIONS
    ========================= */
 
 function askNotification() {
@@ -188,24 +237,28 @@ async function checkPlants() {
   const user = auth.currentUser;
   if (!user) return;
 
-  const snapshot = await db.collection("plants")
-    .where("userId", "==", user.uid)
-    .get();
+  try {
+    const snapshot = await db.collection("plants")
+      .where("userId", "==", user.uid)
+      .get();
 
-  snapshot.forEach(doc => {
-    const plant = doc.data();
+    snapshot.forEach(doc => {
+      const plant = doc.data();
 
-    const now = Date.now();
-    const daysPassed = (now - plant.lastWatered) / (1000*60*60*24);
+      const now = Date.now();
+      const daysPassed = (now - plant.lastWatered) / (1000*60*60*24);
 
-    if (daysPassed >= plant.interval) {
-      if (Notification.permission === "granted") {
-        new Notification("🌱 Water geven!", {
-          body: plant.name + " heeft water nodig"
-        });
+      if (daysPassed >= plant.interval) {
+        if (Notification.permission === "granted") {
+          new Notification("🌱 Water time!", {
+            body: plant.name + " needs water"
+          });
+        }
       }
-    }
-  });
+    });
+  } catch (error) {
+    console.error("Error checking plants:", error);
+  }
 }
 </script>
 
